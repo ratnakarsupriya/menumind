@@ -87,53 +87,38 @@
     font-weight: 300;
   }
 
-  /* Setup bar — CSV only, no API key */
-  .setup-bar {
+  .status-bar {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 14px 16px;
+    padding: 12px 16px;
     margin: 20px 0;
     display: flex;
     align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
+    gap: 10px;
   }
-
-  .setup-bar p {
-    font-size: 0.82rem;
-    color: var(--muted);
-    flex: 1;
-  }
-
-  .setup-bar p span {
-    color: var(--accent);
-    font-family: 'DM Mono', monospace;
-    font-size: 0.75rem;
-  }
-
-  .file-label {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 14px;
-    font-size: 0.78rem;
-    color: var(--muted);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color 0.2s, border-color 0.2s;
-  }
-
-  .file-label:hover { color: var(--accent); border-color: var(--accent); }
-  #csvFile { display: none; }
 
   .status-dot {
     width: 7px; height: 7px;
     border-radius: 50%;
     background: var(--muted);
     flex-shrink: 0;
+    transition: background 0.4s;
   }
-  .status-dot.ready { background: #5a9e5a; box-shadow: 0 0 6px #5a9e5a88; }
+  .status-dot.loading { background: var(--accent); animation: pulse 1s infinite; }
+  .status-dot.ready   { background: #5a9e5a; box-shadow: 0 0 6px #5a9e5a88; }
+  .status-dot.error   { background: var(--accent2); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.25; }
+  }
+
+  #statusMsg {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
 
   .suggestions {
     display: flex;
@@ -180,7 +165,7 @@
 
   @keyframes fadeUp {
     from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   .message-role {
@@ -193,7 +178,7 @@
   }
 
   .message.user .message-role { color: #6a8f6a; }
-  .message.ai .message-role { color: var(--accent); }
+  .message.ai   .message-role { color: var(--accent); }
 
   .message-bubble {
     background: var(--ai-bubble);
@@ -279,8 +264,8 @@
     align-self: flex-end;
   }
 
-  #sendBtn:hover { background: var(--accent2); }
-  #sendBtn:active { transform: scale(0.95); }
+  #sendBtn:hover    { background: var(--accent2); }
+  #sendBtn:active   { transform: scale(0.95); }
   #sendBtn:disabled { background: var(--border); cursor: not-allowed; }
   #sendBtn svg { width: 16px; height: 16px; fill: var(--bg); }
 
@@ -312,7 +297,7 @@
 
   @keyframes bounce {
     0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-6px); opacity: 1; }
+    30%           { transform: translateY(-6px); opacity: 1; }
   }
 
   .context-info {
@@ -335,11 +320,9 @@
     <p class="subtitle">Ask anything about 9,000+ restaurants — in plain English</p>
   </header>
 
-  <div class="setup-bar">
-    <p>Load the Zomato dataset to get started. Get it free from <span>kaggle.com/datasets/shrutimehta/zomato-restaurants-data</span></p>
-    <label for="csvFile" class="file-label" id="fileLabel">📂 Load zomato.csv</label>
-    <input type="file" id="csvFile" accept=".csv" />
-    <div class="status-dot" id="statusDot"></div>
+  <div class="status-bar">
+    <div class="status-dot loading" id="statusDot"></div>
+    <span id="statusMsg">Loading restaurant data...</span>
   </div>
 
   <div class="suggestions">
@@ -348,13 +331,13 @@
     <button class="suggestion-btn" onclick="ask('Which cuisines have the most restaurants?')">Popular cuisines</button>
     <button class="suggestion-btn" onclick="ask('Best restaurants that offer online delivery?')">Best for delivery</button>
     <button class="suggestion-btn" onclick="ask('Any good North Indian restaurants with table booking?')">North Indian + booking</button>
-    <button class="suggestion-btn" onclick="ask('What is the average cost for two people across all restaurants?')">Avg cost for two</button>
+    <button class="suggestion-btn" onclick="ask('What is the average cost for two people?')">Avg cost for two</button>
   </div>
 
   <div class="chat-area" id="chatArea">
     <div class="empty-state" id="emptyState">
       <div class="icon">🍽️</div>
-      <p>Load the CSV above, then start asking</p>
+      <p>Loading restaurant data, just a moment...</p>
     </div>
   </div>
 
@@ -366,7 +349,7 @@
       </button>
     </div>
     <div class="input-meta">
-      <span id="rowCount">No data loaded</span>
+      <span id="rowCount">Loading...</span>
       <span>Enter to send · Shift+Enter for newline</span>
     </div>
   </div>
@@ -377,34 +360,43 @@
   let messages = [];
   let isLoading = false;
 
-  const input = document.getElementById('userInput');
-  input.addEventListener('input', () => {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-  });
+  // ── AUTO-LOAD: fetches zomato.csv served from your own repo ──────────────────
+  // Vercel serves static files from root, so /zomato.csv just works once
+  // you've committed zomato.csv to your GitHub repo.
+  const CSV_URL = '/zomato.csv';
 
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
+  async function loadData() {
+    try {
+      setStatus('loading', 'Loading restaurant data...');
+      const res = await fetch(CSV_URL);
+      if (!res.ok) throw new Error(`Could not fetch data (HTTP ${res.status})`);
+      const text = await res.text();
+      restaurantData = parseCSV(text);
+      if (restaurantData.length === 0) throw new Error('CSV parsed 0 rows — check file format');
 
-  document.getElementById('csvFile').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      restaurantData = parseCSV(ev.target.result);
-      document.getElementById('rowCount').textContent = `${restaurantData.length.toLocaleString()} restaurants loaded`;
-      document.getElementById('fileLabel').textContent = `✅ ${file.name}`;
-      document.getElementById('statusDot').className = 'status-dot ready';
+      setStatus('ready', `${restaurantData.length.toLocaleString()} restaurants loaded`);
+      document.getElementById('rowCount').textContent = `${restaurantData.length.toLocaleString()} restaurants`;
       document.getElementById('sendBtn').disabled = false;
-      document.getElementById('emptyState')?.remove();
-    };
-    reader.readAsText(file);
-  });
+      document.getElementById('emptyState').innerHTML = `
+        <div class="icon">🍽️</div>
+        <p>Ready — ask anything about restaurants</p>
+      `;
+    } catch (err) {
+      setStatus('error', `Failed to load data: ${err.message}`);
+      document.getElementById('rowCount').textContent = 'Data unavailable';
+      document.getElementById('emptyState').innerHTML = `
+        <div class="icon">⚠️</div>
+        <p>${err.message}</p>
+      `;
+    }
+  }
 
+  function setStatus(state, msg) {
+    document.getElementById('statusDot').className = `status-dot ${state}`;
+    document.getElementById('statusMsg').textContent = msg;
+  }
+
+  // ── CSV PARSING ───────────────────────────────────────────────────────────────
   function parseCSV(text) {
     const lines = text.split('\n').filter(l => l.trim());
     if (lines.length < 2) return [];
@@ -423,8 +415,7 @@
   function parseCSVLine(line) {
     const result = [];
     let cur = '', inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
+    for (const ch of line) {
       if (ch === '"') { inQuotes = !inQuotes; }
       else if (ch === ',' && !inQuotes) { result.push(cur); cur = ''; }
       else { cur += ch; }
@@ -433,9 +424,9 @@
     return result;
   }
 
+  // ── RELEVANCE SEARCH ──────────────────────────────────────────────────────────
   function searchRestaurants(query) {
-    const q = query.toLowerCase();
-    const keywords = q.split(/\s+/).filter(w => w.length > 2);
+    const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
     const scored = restaurantData.map(r => {
       const text = Object.values(r).join(' ').toLowerCase();
       let score = 0;
@@ -444,27 +435,42 @@
       keywords.forEach(kw => { if (name.includes(kw)) score += 2; });
       return { row: r, score };
     });
-    const relevant = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 40);
+    const relevant = scored
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 40);
+    // Fall back to a sample if nothing matched
     return relevant.length > 0 ? relevant.map(s => s.row) : restaurantData.slice(0, 50);
   }
 
+  // ── INPUT HANDLING ────────────────────────────────────────────────────────────
+  const inputEl = document.getElementById('userInput');
+
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+  });
+
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
   function ask(q) {
-    if (restaurantData.length === 0) {
-      alert('Please load the zomato.csv file first.');
-      return;
-    }
-    document.getElementById('userInput').value = q;
+    if (restaurantData.length === 0) return;
+    inputEl.value = q;
     sendMessage();
   }
 
+  // ── SEND MESSAGE ──────────────────────────────────────────────────────────────
   async function sendMessage() {
-    const query = input.value.trim();
+    const query = inputEl.value.trim();
     if (!query || isLoading || restaurantData.length === 0) return;
 
     isLoading = true;
     document.getElementById('sendBtn').disabled = true;
-    input.value = '';
-    input.style.height = 'auto';
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    document.getElementById('emptyState')?.remove();
 
     messages.push({ role: 'user', content: query });
     appendMessage('user', query);
@@ -473,9 +479,9 @@
     const context = relevant.map(r => JSON.stringify(r)).join('\n');
 
     const systemPrompt = `You are MenuMind, a knowledgeable and friendly restaurant advisor with access to a real Zomato restaurant database.
-Answer the user's question using the restaurant data below. Be conversational, specific, and genuinely helpful.
+Answer the user's question using only the restaurant data provided below. Be conversational, specific, and genuinely helpful.
 Format responses cleanly — use line breaks between items. Bold restaurant names using **name**.
-If data is insufficient to answer fully, say so honestly rather than guessing.
+If the data is insufficient to fully answer, say so honestly rather than guessing.
 
 RESTAURANT DATA (${relevant.length} relevant rows):
 ${context}`;
@@ -483,7 +489,6 @@ ${context}`;
     const aiMsgEl = appendMessage('ai', null, `Searching ${relevant.length} relevant restaurants...`);
 
     try {
-      // Call our own backend — API key stays server-side
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -501,22 +506,21 @@ ${context}`;
       const data = await response.json();
       const reply = data.reply;
 
-      const bubble = aiMsgEl.querySelector('.message-bubble');
-      bubble.innerHTML = formatReply(reply);
+      aiMsgEl.querySelector('.message-bubble').innerHTML = formatReply(reply);
       aiMsgEl.querySelector('.context-info')?.remove();
-
       messages.push({ role: 'assistant', content: reply });
 
     } catch (err) {
-      const bubble = aiMsgEl.querySelector('.message-bubble');
-      bubble.innerHTML = `<span class="error-msg">Error: ${err.message}</span>`;
+      aiMsgEl.querySelector('.message-bubble').innerHTML =
+        `<span class="error-msg">Error: ${err.message}</span>`;
     }
 
     isLoading = false;
     document.getElementById('sendBtn').disabled = false;
-    input.focus();
+    inputEl.focus();
   }
 
+  // ── RENDERING ─────────────────────────────────────────────────────────────────
   function formatReply(text) {
     return text
       .split('\n\n')
@@ -539,12 +543,9 @@ ${context}`;
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
-
-    if (content === null) {
-      bubble.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
-    } else {
-      bubble.innerHTML = formatReply(content);
-    }
+    bubble.innerHTML = content === null
+      ? `<div class="typing-indicator"><span></span><span></span><span></span></div>`
+      : formatReply(content);
 
     msgEl.appendChild(roleLabel);
     msgEl.appendChild(bubble);
@@ -560,6 +561,9 @@ ${context}`;
     chatArea.scrollTop = chatArea.scrollHeight;
     return msgEl;
   }
+
+  // Kick off immediately on page load
+  loadData();
 </script>
 </body>
 </html>
